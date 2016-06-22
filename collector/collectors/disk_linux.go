@@ -129,11 +129,6 @@ func c_iostat_linux() (opentsdb.MultiDataPoint, error) {
 			if msec_weighted_total != 0 {
 				Add(&md, metric+"msec_weighted_total", msec_weighted_total, ts, metadata.Gauge, metadata.MilliSecond, "")
 			}
-			/*if block_size != 0 {
-				Add(&md, metric+"bytes", int64(write_sectors)*block_size, opentsdb.TagSet{"type": "write"}.Merge(ts), metadata.Counter, metadata.Bytes, "Total number of bytes written to disk.")
-				Add(&md, metric+"bytes", int64(read_sectors)*block_size, opentsdb.TagSet{"type": "read"}.Merge(ts), metadata.Counter, metadata.Bytes, "Total number of bytes read to disk.")
-				Add(&md, metric+"block_size", block_size, ts, metadata.Gauge, metadata.Bytes, "Sector size of the block device.")
-			}*/
 		} else if len(values) == 7 {
 			for i, v := range values[3:] {
 				Add(&md, metric+diskLinuxFieldsPart[i].key, v, ts, diskLinuxFieldsPart[i].rate, diskLinuxFieldsPart[i].unit, "")

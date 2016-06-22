@@ -2,7 +2,6 @@ package collectors
 
 import (
 	"fmt"
-	"io/ioutil"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,18 +39,6 @@ var CPU_FIELDS = []string{
 func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	var md opentsdb.MultiDataPoint
 	var Error error
-	if err := readLine("/proc/uptime", func(s string) error {
-		m := uptimeRE.FindStringSubmatch(s)
-		if m == nil {
-			return nil
-		}
-		Add(&md, "linux.uptime_total", m[1], nil, metadata.Gauge, metadata.Second, osSystemUptimeDesc)
-		Add(&md, "linux.uptime_now", m[2], nil, metadata.Gauge, metadata.Second, "")
-		Add(&md, osSystemUptime, m[1], nil, metadata.Gauge, metadata.Second, osSystemUptimeDesc)
-		return nil
-	}); err != nil {
-		Error = err
-	}
 	mem := make(map[string]float64)
 	if err := readLine("/proc/meminfo", func(s string) error {
 		m := meminfoRE.FindStringSubmatch(s)
@@ -73,26 +60,6 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	Add(&md, osMemUsed, (int(mem["MemTotal"])-(int(mem["MemFree"])+int(mem["Buffers"])+int(mem["Cached"])))*1024, nil, metadata.Gauge, metadata.Bytes, osMemUsedDesc)
 	if mem["MemTotal"] != 0 {
 		Add(&md, osMemPctFree, (mem["MemFree"]+mem["Buffers"]+mem["Cached"])/mem["MemTotal"]*100, nil, metadata.Gauge, metadata.Pct, osMemFreeDesc)
-	}
-	if err := readLine("/proc/vmstat", func(s string) error {
-		m := vmstatRE.FindStringSubmatch(s)
-		if m == nil {
-			return nil
-		}
-		switch m[1] {
-		case "pgpgin", "pgpgout", "pswpin", "pswpout", "pgfault", "pgmajfault":
-			mio := inoutRE.FindStringSubmatch(m[1])
-			if mio != nil {
-				Add(&md, "linux.mem."+mio[1], m[2], opentsdb.TagSet{"direction": mio[2]}, metadata.Counter, metadata.Page, "")
-			} else {
-				Add(&md, "linux.mem."+m[1], m[2], nil, metadata.Counter, metadata.Page, "")
-			}
-		default:
-			Add(&md, "linux.mem."+m[1], m[2], nil, metadata.Counter, metadata.None, "")
-		}
-		return nil
-	}); err != nil {
-		Error = err
 	}
 	num_cores := 0
 	var t_util float64
@@ -198,12 +165,6 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	}); err != nil {
 		Error = err
 	}
-	if err := readLine("/proc/sys/kernel/random/entropy_avail", func(s string) error {
-		Add(&md, "linux.entropy_avail", strings.TrimSpace(s), nil, metadata.Gauge, metadata.Entropy, "The remaing amount of entropy available to the system. If it is low or hitting zero processes might be blocked waiting for extropy")
-		return nil
-	}); err != nil {
-		Error = err
-	}
 	irq_type_desc := map[string]string{
 		"NMI": "Non-maskable interrupts.",
 		"LOC": "Local timer interrupts.",
@@ -250,7 +211,7 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	}); err != nil {
 		Error = err
 	}
-	if err := readLine("/proc/net/sockstat", func(s string) error {
+	/*if err := readLine("/proc/net/sockstat", func(s string) error {
 		cols := strings.Fields(s)
 		switch cols[0] {
 		case "sockets:":
@@ -293,7 +254,8 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 		return nil
 	}); err != nil {
 		Error = err
-	}
+	}*/
+
 	ln := 0
 	var headers []string
 	if err := readLine("/proc/net/netstat", func(s string) error {
@@ -346,36 +308,6 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 		return nil
 	}); err != nil {
 		Error = err
-	}
-	const bondingPath = "/proc/net/bonding"
-	bondDevices, _ := ioutil.ReadDir(bondingPath)
-	for _, fi := range bondDevices {
-		var iface string
-		var slave_count int
-		if err := readLine(bondingPath+"/"+fi.Name(), func(s string) error {
-			f := strings.SplitN(s, ":", 2)
-			if len(f) != 2 {
-				return nil
-			}
-			f[0] = strings.TrimSpace(f[0])
-			f[1] = strings.TrimSpace(f[1])
-			if f[0] == "Slave Interface" {
-				iface = f[1]
-				slave_count++
-			}
-			// TODO: This will probably need to be updated for other types of bonding beside LACP, but I have no examples available to work with at the moment
-			if f[0] == "MII Status" && iface != "" {
-				var status int
-				if f[1] == "up" {
-					status = 1
-				}
-				Add(&md, "linux.net.bond.slave.is_up", status, opentsdb.TagSet{"slave": iface, "bond": fi.Name()}, metadata.Gauge, metadata.Bool, "The status of a bond interface.")
-			}
-			return nil
-		}); err != nil {
-			Error = err
-		}
-		Add(&md, "linux.net.bond.slave.count", slave_count, opentsdb.TagSet{"bond": fi.Name()}, metadata.Gauge, metadata.Bool, "The number of slaves on the bonded interface.")
 	}
 	// TODO: Bonding monitoring for CentOS 7 using /var/run/teamd/* and teamdctl <team0> state
 	if err := readLine("/proc/sys/fs/file-nr", func(s string) error {
