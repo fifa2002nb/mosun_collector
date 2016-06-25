@@ -151,8 +151,6 @@ func AddMeta(metric string, tags opentsdb.TagSet, name string, value interface{}
 			Name:   name,
 			Value:  value,
 		}})
-	} else {
-		log.Debugf("AddMeta for %s/%s/%s: %v", metric, ts, name, value)
 	}
 	metadata[Metakey{metric, ts, name}] = value
 }

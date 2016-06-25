@@ -36,6 +36,15 @@ var CPU_FIELDS = []string{
 	"guest_nice",
 }
 
+var NET_STATS_FIELDS = map[string]bool{
+	"currestab":    true,
+	"indatagrams":  true,
+	"outdatagrams": true,
+	"passiveopens": true,
+	"tcp":          true,
+	"udp":          true,
+}
+
 func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	var md opentsdb.MultiDataPoint
 	var Error error
@@ -50,7 +59,7 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 			return err
 		}
 		mem[m[1]] = i
-		Add(&md, "linux.mem."+strings.ToLower(m[1]), m[2], nil, metadata.Gauge, metadata.KBytes, "")
+		//Add(&md, "linux.mem."+strings.ToLower(m[1]), m[2], nil, metadata.Gauge, metadata.KBytes, "")
 		return nil
 	}); err != nil {
 		Error = err
@@ -211,73 +220,8 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	}); err != nil {
 		Error = err
 	}
-	/*if err := readLine("/proc/net/sockstat", func(s string) error {
-		cols := strings.Fields(s)
-		switch cols[0] {
-		case "sockets:":
-			if len(cols) < 3 {
-				return fmt.Errorf("sockstat: error parsing sockets line")
-			}
-			Add(&md, "linux.net.sockets.used", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-		case "TCP:":
-			if len(cols) < 11 {
-				return fmt.Errorf("sockstat: error parsing tcp line")
-			}
-			Add(&md, "linux.net.sockets.tcp_in_use", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-			Add(&md, "linux.net.sockets.tcp_orphaned", cols[4], nil, metadata.Gauge, metadata.Socket, "")
-			Add(&md, "linux.net.sockets.tcp_time_wait", cols[6], nil, metadata.Gauge, metadata.Socket, "")
-			Add(&md, "linux.net.sockets.tcp_allocated", cols[8], nil, metadata.Gauge, metadata.None, "")
-			Add(&md, "linux.net.sockets.tcp_mem", cols[10], nil, metadata.Gauge, metadata.None, "")
-		case "UDP:":
-			if len(cols) < 5 {
-				return fmt.Errorf("sockstat: error parsing udp line")
-			}
-			Add(&md, "linux.net.sockets.udp_in_use", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-			Add(&md, "linux.net.sockets.udp_mem", cols[4], nil, metadata.Gauge, metadata.Page, "")
-		case "UDPLITE:":
-			if len(cols) < 3 {
-				return fmt.Errorf("sockstat: error parsing udplite line")
-			}
-			Add(&md, "linux.net.sockets.udplite_in_use", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-		case "RAW:":
-			if len(cols) < 3 {
-				return fmt.Errorf("sockstat: error parsing raw line")
-			}
-			Add(&md, "linux.net.sockets.raw_in_use", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-		case "FRAG:":
-			if len(cols) < 5 {
-				return fmt.Errorf("sockstat: error parsing frag line")
-			}
-			Add(&md, "linux.net.sockets.frag_in_use", cols[2], nil, metadata.Gauge, metadata.Socket, "")
-			Add(&md, "linux.net.sockets.frag_mem", cols[4], nil, metadata.Gauge, metadata.Bytes, "")
-		}
-		return nil
-	}); err != nil {
-		Error = err
-	}*/
-
 	ln := 0
 	var headers []string
-	if err := readLine("/proc/net/netstat", func(s string) error {
-		cols := strings.Fields(s)
-		if ln%2 == 0 {
-			headers = cols
-		} else {
-			if len(cols) < 1 || len(cols) != len(headers) {
-				return fmt.Errorf("netstat: parsing failed")
-			}
-			root := strings.ToLower(strings.TrimSuffix(headers[0], "Ext:"))
-			for i, v := range cols[1:] {
-				i++
-				m := "linux.net.stat." + root + "." + strings.TrimPrefix(strings.ToLower(headers[i]), "tcp")
-				Add(&md, m, v, nil, metadata.Counter, metadata.None, "")
-			}
-		}
-		ln += 1
-		return nil
-	}); err != nil {
-		Error = err
-	}
 	ln = 0
 	if err := readLine("/proc/net/snmp", func(s string) error {
 		ln++
@@ -293,16 +237,20 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 				return fmt.Errorf("Mismatched header and value length")
 			}
 			proto := strings.ToLower(strings.TrimSuffix(values[0], ":"))
-			for i, v := range values {
-				if i == 0 {
-					continue
+			if _, ok := NET_STATS_FIELDS[proto]; ok {
+				for i, v := range values {
+					if i == 0 {
+						continue
+					}
+					var stype metadata.RateType = metadata.Counter
+					stat := strings.ToLower(headers[i])
+					if strings.HasPrefix(stat, "rto") {
+						stype = metadata.Gauge
+					}
+					if _, ok1 := NET_STATS_FIELDS[stat]; ok1 {
+						Add(&md, "linux.net.stat."+proto+"."+stat, v, nil, stype, metadata.None, "")
+					}
 				}
-				var stype metadata.RateType = metadata.Counter
-				stat := strings.ToLower(headers[i])
-				if strings.HasPrefix(stat, "rto") {
-					stype = metadata.Gauge
-				}
-				Add(&md, "linux.net.stat."+proto+"."+stat, v, nil, stype, metadata.None, "")
 			}
 		}
 		return nil

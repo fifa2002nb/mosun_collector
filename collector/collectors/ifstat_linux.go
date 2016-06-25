@@ -6,12 +6,10 @@ import (
 
 	"mosun_collector/metadata"
 	"mosun_collector/opentsdb"
-	"mosun_collector/util"
 )
 
 func init() {
 	collectors = append(collectors, &IntervalCollector{F: c_ifstat_linux})
-	collectors = append(collectors, &IntervalCollector{F: c_ipcount_linux})
 }
 
 var netFields = []struct {
@@ -40,28 +38,6 @@ var netFields = []struct {
 var ifstatRE = regexp.MustCompile(`\s+(eth\d+|em\d+_\d+/\d+|em\d+_\d+|em\d+|` +
 	`bond\d+|team\d+|` + `p\d+p\d+_\d+/\d+|p\d+p\d+_\d+|p\d+p\d+):(.*)`)
 
-func c_ipcount_linux() (opentsdb.MultiDataPoint, error) {
-	var md opentsdb.MultiDataPoint
-	v4c := 0
-	v6c := 0
-	err := util.ReadCommand(func(line string) error {
-		tl := strings.TrimSpace(line)
-		if strings.HasPrefix(tl, "inet ") {
-			v4c++
-		}
-		if strings.HasPrefix(tl, "inet6 ") {
-			v6c++
-		}
-		return nil
-	}, "ip", "addr", "list")
-	if err != nil {
-		return md, err
-	}
-	Add(&md, "linux.net.ip_count", v4c, opentsdb.TagSet{"version": "4"}, metadata.Gauge, "IP_Addresses", "")
-	Add(&md, "linux.net.ip_count", v6c, opentsdb.TagSet{"version": "6"}, metadata.Gauge, "IP_Addresses", "")
-	return md, nil
-}
-
 func c_ifstat_linux() (opentsdb.MultiDataPoint, error) {
 	var md opentsdb.MultiDataPoint
 	direction := func(i int) string {
@@ -85,17 +61,18 @@ func c_ifstat_linux() (opentsdb.MultiDataPoint, error) {
 		}
 		// Detect speed of the interface in question
 		_ = readLine("/sys/class/net/"+intf+"/speed", func(speed string) error {
-			Add(&md, "linux.net."+bond_string+"ifspeed", speed, tags, metadata.Gauge, metadata.Megabit, "")
 			Add(&md, "os.net."+bond_string+"ifspeed", speed, tags, metadata.Gauge, metadata.Megabit, "")
 			return nil
 		})
 		for i, v := range stats {
-			Add(&md, "linux.net."+bond_string+strings.Replace(netFields[i].key, ".", "_", -1), v, opentsdb.TagSet{
-				"iface":     intf,
-				"direction": direction(i),
-			}, netFields[i].rate, netFields[i].unit, "")
 			if i < 4 || (i >= 8 && i < 12) {
 				Add(&md, "os.net."+bond_string+strings.Replace(netFields[i].key, ".", "_", -1), v, opentsdb.TagSet{
+					"iface":     intf,
+					"direction": direction(i),
+				}, netFields[i].rate, netFields[i].unit, "")
+
+			} else {
+				Add(&md, "linux.net."+bond_string+strings.Replace(netFields[i].key, ".", "_", -1), v, opentsdb.TagSet{
 					"iface":     intf,
 					"direction": direction(i),
 				}, netFields[i].rate, netFields[i].unit, "")
