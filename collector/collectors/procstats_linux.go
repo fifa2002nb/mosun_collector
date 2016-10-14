@@ -23,19 +23,6 @@ var cpuspeedRE = regexp.MustCompile(`cpu MHz\s+: ([\d.]+)`)
 var loadavgRE = regexp.MustCompile(`(\S+)\s+(\S+)\s+(\S+)\s+(\d+)/(\d+)\s+`)
 var inoutRE = regexp.MustCompile(`(.*)(in|out)`)
 
-var CPU_FIELDS = []string{
-	"user",
-	"nice",
-	"system",
-	"idle",
-	"iowait",
-	"irq",
-	"softirq",
-	"steal",
-	"guest",
-	"guest_nice",
-}
-
 var NET_STATS_FIELDS = map[string]bool{
 	"currestab":    true,
 	"indatagrams":  true,
@@ -59,59 +46,28 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 			return err
 		}
 		mem[m[1]] = i
-		//Add(&md, "linux.mem."+strings.ToLower(m[1]), m[2], nil, metadata.Gauge, metadata.KBytes, "")
 		return nil
 	}); err != nil {
 		Error = err
 	}
-	Add(&md, osMemTotal, int(mem["MemTotal"])*1024, nil, metadata.Gauge, metadata.Bytes, osMemTotalDesc)
-	Add(&md, osMemFree, int(mem["MemFree"])*1024, nil, metadata.Gauge, metadata.Bytes, osMemFreeDesc)
-	Add(&md, osMemUsed, (int(mem["MemTotal"])-(int(mem["MemFree"])+int(mem["Buffers"])+int(mem["Cached"])))*1024, nil, metadata.Gauge, metadata.Bytes, osMemUsedDesc)
-	if mem["MemTotal"] != 0 {
-		Add(&md, osMemPctFree, (mem["MemFree"]+mem["Buffers"]+mem["Cached"])/mem["MemTotal"]*100, nil, metadata.Gauge, metadata.Pct, osMemFreeDesc)
+	Add(&md, osMemUsed, (int(mem["MemTotal"])-(int(mem["MemFree"])+int(mem["Buffers"])+int(mem["Cached"])))*1024, nil, metadata.Gauge, metadata.Bytes, osMemUsedDesc) //内存使用字节数
+	if mem["MemTotal"] != 0 && mem["MemFree"] != 0 {
+		Add(&md, osMemPctUsed, (mem["MemTotal"]-mem["MemFree"]-mem["Buffers"]-mem["Cached"])/mem["MemTotal"], nil, metadata.Gauge, metadata.Pct, osMemUsedDesc) //内存使用率（不包含buffer和cached）
 	}
 	num_cores := 0
 	var t_util float64
-	cpu_stat_desc := map[string]string{
-		"user":       "Normal processes executing in user mode.",
-		"nice":       "Niced processes executing in user mode.",
-		"system":     "Processes executing in kernel mode.",
-		"idle":       "Twiddling thumbs.",
-		"iowait":     "Waiting for I/O to complete.",
-		"irq":        "Servicing interrupts.",
-		"softirq":    "Servicing soft irqs.",
-		"steal":      "Involuntary wait.",
-		"guest":      "Running a guest vm.",
-		"guest_nice": "Running a niced guest vm.",
-	}
+	var t_idle float64
 	if err := readLine("/proc/stat", func(s string) error {
 		m := statRE.FindStringSubmatch(s)
 		if m == nil {
 			return nil
 		}
 		if strings.HasPrefix(m[1], "cpu") {
-			metric_percpu := ""
-			tag_cpu := ""
-			cpu_m := statCPURE.FindStringSubmatch(m[1])
-			if cpu_m != nil {
-				num_cores += 1
-				metric_percpu = ".percpu"
-				tag_cpu = cpu_m[1]
-			}
+			cpu_m := statCPURE.FindStringSubmatch(m[1]) //匹配各个单核字段
 			fields := strings.Fields(m[2])
-			for i, value := range fields {
-				if i >= len(CPU_FIELDS) {
-					break
-				}
-				tags := opentsdb.TagSet{
-					"type": CPU_FIELDS[i],
-				}
-				if tag_cpu != "" {
-					tags["cpu"] = tag_cpu
-				}
-				Add(&md, "linux.cpu"+metric_percpu, value, tags, metadata.Counter, metadata.CHz, cpu_stat_desc[CPU_FIELDS[i]])
-			}
-			if metric_percpu == "" {
+			if nil != cpu_m {
+				num_cores += 1
+			} else { //这里只记录所有cpu核汇总的统计值
 				if len(fields) < 3 {
 					return nil
 				}
@@ -127,12 +83,33 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 				if err != nil {
 					return nil
 				}
-				t_util = user + nice + system
+				idle, err := strconv.ParseFloat(fields[3], 64)
+				if err != nil {
+					return nil
+				}
+				iowait, err := strconv.ParseFloat(fields[4], 64)
+				if err != nil {
+					return nil
+				}
+				irq, err := strconv.ParseFloat(fields[5], 64)
+				if err != nil {
+					return nil
+				}
+				softirq, err := strconv.ParseFloat(fields[6], 64)
+				if err != nil {
+					return nil
+				}
+				steal, err := strconv.ParseFloat(fields[7], 64)
+				if err != nil {
+					return nil
+				}
+				guest, err := strconv.ParseFloat(fields[8], 64)
+				if err != nil {
+					return nil
+				}
+				t_util = user + nice + system + iowait + irq + softirq + steal + guest
+				t_idle = idle
 			}
-		} else if m[1] == "intr" {
-			Add(&md, "linux.intr", strings.Fields(m[2])[0], nil, metadata.Counter, metadata.Interupt, "")
-		} else if m[1] == "ctxt" {
-			Add(&md, "linux.ctxt", m[2], nil, metadata.Counter, metadata.ContextSwitch, "")
 		} else if m[1] == "processes" {
 			Add(&md, "linux.processes", m[2], nil, metadata.Counter, metadata.Process,
 				"The number  of processes and threads created, which includes (but  is not limited  to) those  created by  calls to the  fork() and clone() system calls.")
@@ -143,8 +120,10 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 	}); err != nil {
 		Error = err
 	}
-	if num_cores != 0 && t_util != 0 {
-		Add(&md, osCPU, t_util/float64(num_cores), nil, metadata.Counter, metadata.Pct, "")
+	if num_cores != 0 && t_util != 0 && t_idle != 0 {
+		Add(&md, osCPU+".used", t_util, nil, metadata.Counter, metadata.Pct, "")
+		Add(&md, osCPU+".idle", t_idle, nil, metadata.Counter, metadata.Pct, "")
+		Add(&md, osCPU+".percent_used", (t_util)/(t_util+t_idle), nil, metadata.Counter, metadata.Pct, "")
 	}
 	cpuinfo_index := 0
 	if err := readLine("/proc/cpuinfo", func(s string) error {
@@ -154,7 +133,6 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 		}
 		tags := opentsdb.TagSet{"cpu": strconv.Itoa(cpuinfo_index)}
 		Add(&md, osCPUClock, m[1], tags, metadata.Gauge, metadata.MHz, osCPUClockDesc)
-		Add(&md, "linux.cpu.clock", m[1], tags, metadata.Gauge, metadata.MHz, osCPUClockDesc)
 		cpuinfo_index += 1
 		return nil
 	}); err != nil {
@@ -180,13 +158,6 @@ func c_procstats_linux() (opentsdb.MultiDataPoint, error) {
 		"SPU": "Spurious interrupts.",
 		"PMI": "Performance monitoring interrupts.",
 		"IWI": "IRQ work interrupts.",
-		"RES": "Rescheduling interrupts.",
-		"CAL": "Funcation call interupts.",
-		"TLB": "TLB (translation lookaside buffer) shootdowns.",
-		"TRM": "Thermal event interrupts.",
-		"THR": "Threshold APIC interrupts.",
-		"MCE": "Machine check exceptions.",
-		"MCP": "Machine Check polls.",
 	}
 	num_cpus := 0
 	if err := readLine("/proc/interrupts", func(s string) error {

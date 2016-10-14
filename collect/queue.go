@@ -73,15 +73,11 @@ func sendBatch(batch []*opentsdb.DataPoint) {
 	}
 	d := time.Since(now).Nanoseconds() / 1e6
 	Sample("collect.post.duration", Tags, float64(d))
-	Add("collect.post.total_duration", Tags, d)
-	Add("collect.post.count", Tags, 1)
 	// Some problem with connecting to the server; retry later.
 	if err != nil || resp.StatusCode != http.StatusNoContent {
 		if err != nil {
-			Add("collect.post.error", Tags, 1)
 			log.Error(err)
 		} else if resp.StatusCode != http.StatusNoContent {
-			Add("collect.post.bad_status", Tags, 1)
 			log.Errorln(resp.Status)
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
@@ -97,7 +93,6 @@ func sendBatch(batch []*opentsdb.DataPoint) {
 			tchan <- msg
 		}
 		d := time.Second * 5
-		Add("collect.post.restore", Tags, int64(restored))
 		log.Infof("restored %d, sleeping %s", restored, d)
 		time.Sleep(d)
 		return
@@ -127,7 +122,6 @@ func SendDataPoints(dps []*opentsdb.DataPoint, tsdb string) (*http.Response, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	Add("collect.post.total_bytes", Tags, int64(buf.Len()))
 	resp, err := client.Do(req)
 	return resp, err
 }

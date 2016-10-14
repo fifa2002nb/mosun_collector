@@ -241,7 +241,7 @@ func readConf(c *cli.Context) *conf.Conf {
 		Host:      "127.0.0.1",
 	}
 	conf := &conf.Conf{
-		Freq: 10,
+		Freq: 5,
 	}
 	if c.IsSet("conf") {
 		loc = c.String("conf")

@@ -152,26 +152,20 @@ func c_dfstat_blocks_linux() (opentsdb.MultiDataPoint, error) {
 		}
 		fs := fields[0]
 		mount := fields[5]
-		//metric := "linux.disk.fs."
 		ometric := "os.disk.fs."
 		flag, devName := removable_fs(fs)
 		if flag {
-			//metric += "rem."
 			ometric += "rem."
 		}
-		//tags := opentsdb.TagSet{"mount": mount, "dev": devName}
 		os_tags := opentsdb.TagSet{"disk": mount, "dev": devName}
 
-		//Add(&md, metric+"space_total", fields[1], tags, metadata.Gauge, metadata.Bytes, osDiskTotalDesc)
-		//Add(&md, metric+"space_used", fields[2], tags, metadata.Gauge, metadata.Bytes, osDiskUsedDesc)
-		//Add(&md, metric+"space_free", fields[3], tags, metadata.Gauge, metadata.Bytes, osDiskFreeDesc)
 		Add(&md, ometric+"space_total", fields[1], os_tags, metadata.Gauge, metadata.Bytes, osDiskTotalDesc)
 		Add(&md, ometric+"space_used", fields[2], os_tags, metadata.Gauge, metadata.Bytes, osDiskUsedDesc)
 		Add(&md, ometric+"space_free", fields[3], os_tags, metadata.Gauge, metadata.Bytes, osDiskFreeDesc)
 		st, _ := strconv.ParseFloat(fields[1], 64)
 		sf, _ := strconv.ParseFloat(fields[3], 64)
 		if st != 0 {
-			Add(&md, osDiskPctFree, sf/st*100, os_tags, metadata.Gauge, metadata.Pct, osDiskPctFreeDesc)
+			Add(&md, osDiskPctUsed, sf/st, os_tags, metadata.Gauge, metadata.Pct, osDiskPctFreeDesc)
 		}
 		return nil
 	}, "df", "-lP", "--block-size", "1")
